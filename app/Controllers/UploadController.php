@@ -11,7 +11,7 @@ class UploadController extends ResourceController
     {
         return [
             'upload_dir'    => rtrim(env('UPLOAD_DIR', WRITEPATH . '../public/uploads/'), '/') . '/',
-            'assets_domain' => rtrim(env('ASSETS_DOMAIN', 'http://assets.giang.test/image/'), '/')
+            'assets_domain' => rtrim(env('ASSETS_DOMAIN', 'http://assets.goldenwin.local/image/'), '/')
         ];
     }
 
@@ -20,8 +20,8 @@ class UploadController extends ResourceController
         // Cho phép origin động tuỳ theo môi trường
         return [
             // Localhost
-            'http://giang.test:5173',
-            'http://api.giang.test',
+            'http://goldenwin.local:5173',
+            'http://api.goldenwin.local',
 
             // Trên VPS / production
             'https://admin-qrcode.labit365.com',
