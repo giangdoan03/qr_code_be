@@ -17,18 +17,18 @@ coverage/
 # Local env files
 .env
 .env.*.local
-.env.*       # ← chặn mọi .env.production, .env.development...
+.env.*
 be/.env.*
 fe/.env.*
 fe/.env.production
 fe/.gitignore
-
 
 # Ignore specific files
 fe/vite.config.js
 be/public/index.php
 client_view/js/api.js
 client_view/js/template-common.js
+
 # System files
 .DS_Store
 
@@ -46,3 +46,6 @@ client_view/js/template-common.js
 *.sln
 *.sw?
 *.tsbuildinfo
+
+# Vendor directory (CodeIgniter, Composer)
+/vendor/
