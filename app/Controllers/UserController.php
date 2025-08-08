@@ -166,7 +166,7 @@ class UserController extends ResourceController
     {
         $data = $this->request->getPost();
 
-        // Xử lý avatar
+        // Xử lý avatar test ci/cd
         $file = $this->request->getFile('avatar');
         if ($file && $file->isValid()) {
             $newName = $file->getRandomName();
