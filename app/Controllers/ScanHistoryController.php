@@ -13,7 +13,7 @@ class ScanHistoryController extends ResourceController
     use AuthTrait;
 
     protected $format = 'json';
-    protected $scanLogModel;
+    protected QrScanLogModel $scanLogModel;
 
     public function __construct()
     {
