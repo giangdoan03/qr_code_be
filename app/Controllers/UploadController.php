@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use CodeIgniter\HTTP\ResponseInterface;
 use CodeIgniter\RESTful\ResourceController;
+use Config\Services;
 
 class UploadController extends ResourceController
 {
@@ -59,44 +60,51 @@ class UploadController extends ResourceController
 
     public function upload(): ResponseInterface
     {
-        $config = $this->getUploadConfig();
-        $origin = $_SERVER['HTTP_ORIGIN'] ?? null;
-
-        // Xử lý preflight trước
-        if ($this->request->getMethod(true) === 'OPTIONS') {
-            if ($origin && $this->isAllowedOrigin($origin, $config['cors_origins'])) {
-                $this->applyCorsHeaders($origin);
-                return $this->respond('', 204);
-            }
-            return $this->failForbidden('CORS blocked.');
-        }
-
-        // Kiểm tra CORS thực thi
-        if ($origin && !$this->isAllowedOrigin($origin, $config['cors_origins'])) {
-            return $this->failForbidden('Không được phép upload từ domain này.');
-        }
-        if ($origin) $this->applyCorsHeaders($origin);
-
         $file = $this->request->getFile('file');
         if (!$file || !$file->isValid()) {
-            return $this->fail('Không tìm thấy file hoặc file không hợp lệ.');
+            return $this->fail('Thiếu file hoặc file không hợp lệ.');
         }
 
-        // (khuyến nghị) giới hạn định dạng
-        $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'];
-        if (!in_array(strtolower($file->getExtension()), $allowed, true)) {
-            return $this->fail('Định dạng file không được hỗ trợ.');
+        $endpoint = (string) env('WP_MEDIA_ENDPOINT', '');
+        $user     = (string) env('WP_USER', '');
+        $pass     = (string) env('WP_APP_PASSWORD', '');
+        if ($endpoint === '' || $user === '' || $pass === '') {
+            return $this->failServerError('Thiếu cấu hình WP_MEDIA_ENDPOINT / WP_USER / WP_APP_PASSWORD.');
         }
 
-        if (!is_dir($config['upload_dir'])) {
-            mkdir($config['upload_dir'], 0777, true);
+        $auth   = 'Basic ' . base64_encode($user . ':' . $pass);
+        $ctype  = $file->getMimeType() ?: 'application/octet-stream';
+        $client = Services::curlrequest([
+            'timeout'     => 40,
+            'http_errors' => false,
+            'headers'     => [
+                'Authorization' => $auth,
+                'Accept'        => 'application/json',
+            ],
+        ]);
+
+        // Gửi y như Postman: multipart/form-data với key "file"
+        $resp = $client->post($endpoint, [
+            'multipart' => [[
+                'name'     => 'file',
+                'contents' => fopen($file->getTempName(), 'rb'),
+                'filename' => $file->getName(),     // hoặc $file->getRandomName()
+                'headers'  => ['Content-Type' => $ctype],
+            ]],
+        ]);
+
+        $code = $resp->getStatusCode();
+        $body = (string) $resp->getBody();
+        if ($code === 201) {
+            $json = json_decode($body, true);
+            return $this->respond([
+                'id'  => $json['id'] ?? null,
+                'url' => $json['source_url'] ?? null,
+            ]);
         }
 
-        $newName = $file->getRandomName();
-        $file->move($config['upload_dir'], $newName);
-
-        $publicUrl = $config['assets_domain'] . '/' . $newName;
-        return $this->respond(['url' => $publicUrl]);
+        // Trả nguyên body để dễ debug như khi test Postman
+        return $this->failServerError($body ?: ('WordPress trả mã ' . $code));
     }
 
     public function uploadFromUrl(): ResponseInterface
@@ -141,4 +149,6 @@ class UploadController extends ResourceController
         $publicUrl = $config['assets_domain'] . '/' . $filename;
         return $this->respond(['url' => $publicUrl]);
     }
+
+
 }
