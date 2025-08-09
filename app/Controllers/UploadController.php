@@ -7,44 +7,86 @@ use CodeIgniter\RESTful\ResourceController;
 
 class UploadController extends ResourceController
 {
+    /** Đọc và chuẩn hoá config từ .env */
     private function getUploadConfig(): array
     {
         return [
-            'upload_dir'    => rtrim(env('UPLOAD_DIR', WRITEPATH . '../public/uploads/'), '/') . '/',
-            'assets_domain' => rtrim(env('ASSETS_DOMAIN', 'http://assets.goldenwin.local/image/'), '/')
+            'upload_dir'    => rtrim(env('UPLOAD_DIR', WRITEPATH . '../public/uploads/'), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR,
+            'assets_domain' => rtrim(env('ASSETS_DOMAIN', 'http://assets.goldenwin.local/files'), '/'),
+            'cors_origins'  => $this->envList(),
         ];
     }
 
-    private function getAllowedOrigins(): array
+    /** Tách list trong .env thành mảng, ngăn cách bởi dấu phẩy */
+    private function envList(): array
     {
-        // Cho phép origin động tuỳ theo môi trường
-        return [
-            // Localhost
-            'http://goldenwin.local:5173',
-            'http://api.goldenwin.local',
+        $raw = (string) env('CORS_ALLOWED_ORIGINS', '');
+        if ($raw === '') return [];
+        $items = preg_split('/\s*,\s*/', $raw, -1, PREG_SPLIT_NO_EMPTY);
+        // Loại trùng và chuẩn hoá bỏ dấu / cuối
+        return array_unique(array_map(fn($o) => rtrim($o, '/'), $items));
+    }
 
-            // Trên VPS / production
-            'https://admin-qrcode.labit365.com',
-            'https://qrcode.labit365.com',
-            'https://api-qrcode.labit365.com',
-        ];
+    /** Kiểm tra origin có được phép không (so khớp chính xác + hỗ trợ *) */
+    private function isAllowedOrigin(?string $origin, array $allowed): bool
+    {
+        if (!$origin) return false;
+        $origin = rtrim($origin, '/');
+
+        if (in_array('*', $allowed, true)) return true;
+        if (in_array($origin, $allowed, true)) return true;
+
+        // Hỗ trợ pattern đơn giản: https://*.goldenwin.vn
+        foreach ($allowed as $pat) {
+            if (str_contains($pat, '*')) {
+                $regex = '#^' . str_replace('\*', '.*', preg_quote($pat, '#')) . '$#i';
+                if (preg_match($regex, $origin)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Set CORS headers cho response */
+    private function applyCorsHeaders(string $origin): void
+    {
+        $this->response
+            ->setHeader('Access-Control-Allow-Origin', $origin)
+            ->setHeader('Vary', 'Origin')
+            ->setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+            ->setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+            ->setHeader('Access-Control-Allow-Credentials', 'true');
     }
 
     public function upload(): ResponseInterface
     {
-        $allowedOrigins = $this->getAllowedOrigins();
+        $config = $this->getUploadConfig();
         $origin = $_SERVER['HTTP_ORIGIN'] ?? null;
 
-        if ($origin && !in_array($origin, $allowedOrigins)) {
+        // Xử lý preflight trước
+        if ($this->request->getMethod(true) === 'OPTIONS') {
+            if ($origin && $this->isAllowedOrigin($origin, $config['cors_origins'])) {
+                $this->applyCorsHeaders($origin);
+                return $this->respond('', 204);
+            }
+            return $this->failForbidden('CORS blocked.');
+        }
+
+        // Kiểm tra CORS thực thi
+        if ($origin && !$this->isAllowedOrigin($origin, $config['cors_origins'])) {
             return $this->failForbidden('Không được phép upload từ domain này.');
         }
+        if ($origin) $this->applyCorsHeaders($origin);
 
         $file = $this->request->getFile('file');
         if (!$file || !$file->isValid()) {
             return $this->fail('Không tìm thấy file hoặc file không hợp lệ.');
         }
 
-        $config = $this->getUploadConfig();
+        // (khuyến nghị) giới hạn định dạng
+        $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'];
+        if (!in_array(strtolower($file->getExtension()), $allowed, true)) {
+            return $this->fail('Định dạng file không được hỗ trợ.');
+        }
 
         if (!is_dir($config['upload_dir'])) {
             mkdir($config['upload_dir'], 0777, true);
@@ -54,43 +96,49 @@ class UploadController extends ResourceController
         $file->move($config['upload_dir'], $newName);
 
         $publicUrl = $config['assets_domain'] . '/' . $newName;
-
         return $this->respond(['url' => $publicUrl]);
     }
 
     public function uploadFromUrl(): ResponseInterface
     {
-        $url = $this->request->getJSON()->url ?? null;
+        $config = $this->getUploadConfig();
+        $origin = $_SERVER['HTTP_ORIGIN'] ?? null;
 
+        // preflight cho endpoint này
+        if ($this->request->getMethod(true) === 'OPTIONS') {
+            if ($origin && $this->isAllowedOrigin($origin, $config['cors_origins'])) {
+                $this->applyCorsHeaders($origin);
+                return $this->respond('', 204);
+            }
+            return $this->failForbidden('CORS blocked.');
+        }
+        if ($origin) $this->applyCorsHeaders($origin);
+
+        $url = $this->request->getJSON()->url ?? null;
         if (!$url || !filter_var($url, FILTER_VALIDATE_URL)) {
             return $this->fail('URL không hợp lệ.');
         }
 
         try {
-            $imageContents = file_get_contents($url);
-        } catch (\Exception $e) {
+            $imageContents = file_get_contents($url); // cần bật allow_url_fopen
+        } catch (\Throwable $e) {
             return $this->fail('Không thể tải ảnh từ URL.');
         }
 
-        $pathInfo = pathinfo($url);
-        $extension = isset($pathInfo['extension']) ? strtolower($pathInfo['extension']) : 'jpg';
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?? '', PATHINFO_EXTENSION) ?: 'jpg');
         $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-
-        if (!in_array($extension, $allowedExtensions)) {
+        if (!in_array($ext, $allowedExtensions, true)) {
             return $this->fail('Định dạng file không được hỗ trợ.');
         }
-
-        $filename = uniqid() . '.' . $extension;
-        $config = $this->getUploadConfig();
 
         if (!is_dir($config['upload_dir'])) {
             mkdir($config['upload_dir'], 0777, true);
         }
 
+        $filename = uniqid('', true) . '.' . $ext;
         file_put_contents($config['upload_dir'] . $filename, $imageContents);
 
         $publicUrl = $config['assets_domain'] . '/' . $filename;
-
         return $this->respond(['url' => $publicUrl]);
     }
 }
