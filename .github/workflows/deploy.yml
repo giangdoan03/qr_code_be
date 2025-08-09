@@ -2,8 +2,7 @@ name: Deploy to VPS
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -11,16 +10,37 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Deploy to VPS via SSH
+      - name: Deploy to VPS via SSH (hard reset)
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: 31.97.188.40
           username: goldenwin-api
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /home/goldenwin-api/htdocs/api.goldenwin.vn
-            git pull origin main
-            composer install --no-interaction --prefer-dist --optimize-autoloader
-            php spark cache:clear
+            set -e
+            APP_DIR=/home/goldenwin-api/htdocs/api.goldenwin.vn
+            REPO_URL=https://github.com/giangdoan03/qr_code_be.git
+
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # Nếu chưa là repo git thì clone mới
+            if [ ! -d .git ]; then
+              git clone --depth=1 "$REPO_URL" "$APP_DIR"
+            else
+              git fetch origin main
+              # BỎ HẾT thay đổi cục bộ để tránh "would be overwritten by merge"
+              git reset --hard origin/main
+              # Xoá file/thư mục thừa nhưng giữ env & writable
+              git clean -fdx -e .env -e .env.production -e writable
+            fi
+
+            composer install --no-dev --prefer-dist --optimize-autoloader
+            php spark cache:clear || true
+            php -r 'function_exists("opcache_reset") && opcache_reset();'
+
+            # Debug xác nhận đã cập nhật
+            git log -1 --oneline
+            ls -la app/Controllers | tail -n 5
