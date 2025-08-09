@@ -12,7 +12,7 @@ class UploadController extends ResourceController
     {
         return [
             'upload_dir'    => rtrim(env('UPLOAD_DIR', WRITEPATH . '../public/uploads/'), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR,
-            'assets_domain' => rtrim(env('ASSETS_DOMAIN', 'http://assets.goldenwin.local/files'), '/'),
+            'assets_domain' => rtrim(env('ASSETS_DOMAIN', 'https://assets.goldenwin.vn/files'), '/'),
             'cors_origins'  => $this->envList(),
         ];
     }
