@@ -85,12 +85,11 @@ class UploadController extends ResourceController
 
         // Gửi y như Postman: multipart/form-data với key "file"
         $resp = $client->post($endpoint, [
-            'multipart' => [[
-                'name'     => 'file',
-                'contents' => fopen($file->getTempName(), 'rb'),
-                'filename' => $file->getName(),     // hoặc $file->getRandomName()
-                'headers'  => ['Content-Type' => $ctype],
-            ]],
+            'headers' => [
+                'Content-Type'        => $ctype,
+                'Content-Disposition' => 'attachment; filename="' . $file->getClientName() . '"',
+            ],
+            'body' => file_get_contents($file->getTempName()), // ✅ chuỗi nhị phân
         ]);
 
         $code = $resp->getStatusCode();

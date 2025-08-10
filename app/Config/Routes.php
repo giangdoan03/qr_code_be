@@ -26,8 +26,12 @@ $routes->group('api', function ($routes) {
     $routes->resource('events', ['controller' => 'EventController']);
     $routes->resource('stores', ['controller' => 'StoreController']);
 
-    $routes->post('upload', 'UploadController::upload');
-    $routes->post('upload-from-url', 'UploadController::uploadFromUrl');
+//    $routes->post('upload', 'UploadController::upload');
+//    $routes->post('upload-from-url', 'UploadController::uploadFromUrl');
+
+    // WP Media proxy (preflight + upload)
+    $routes->match(['options','post'], 'upload', 'ControllerWpMediaProxy::upload');
+    $routes->match(['options','post'], 'upload-from-url', 'ControllerWpMediaProxy::uploadFromUrl');
 
     $routes->get('images/(:segment)/(:num)', 'ImageController::list/$1/$2');
     $routes->get('images/cover/(:segment)/(:num)', 'ImageController::cover/$1/$2');
