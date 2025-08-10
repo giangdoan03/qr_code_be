@@ -19,6 +19,8 @@ class CustomerModel extends Model
         'package_start_date', // ✅ ngày bắt đầu dùng gói
         'package_end_date',   // ✅ ngày hết hạn
         'note',               // ✅ ghi chú nếu cần
+        'qr_quota',
+        'qr_used',
         'created_at', 'updated_at'
     ];
 

@@ -27,6 +27,8 @@ class UserModel extends Model
         'package_start_date',
         'package_end_date',
         'note',
+        'qr_quota',
+        'qr_used',
         'created_at',
         'updated_at'
     ];

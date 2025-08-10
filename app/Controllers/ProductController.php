@@ -40,20 +40,16 @@ class ProductController extends ResourceController
     {
         $userId = $this->getUserId();
 
-        // Lấy thông tin người dùng
-        $user = model('App\Models\UserModel')->find($userId);
+        $user    = model('App\Models\UserModel')->find($userId);
         $isAdmin = $user && $user['role'] === 'admin';
 
-        log_message('debug', 'SESSION USER_ID in index: ' . $userId);
-
         $productModel = new ProductModel();
-        $perPage = $this->request->getGet('per_page') ?? 10;
-        $page = $this->request->getGet('page') ?? 1;
-        $search = $this->request->getGet('search');
+        $perPage = (int) ($this->request->getGet('per_page') ?? 10);
+        $page    = (int) ($this->request->getGet('page') ?? 1);
+        $search  = $this->request->getGet('search');
 
         $builder = $productModel->where('deleted_at', null);
 
-        // Nếu không phải admin thì chỉ xem sản phẩm của chính mình
         if (!$isAdmin) {
             $builder->where('user_id', $userId);
         }
@@ -65,12 +61,15 @@ class ProductController extends ResourceController
                 ->groupEnd();
         }
 
+        // 👉 Sắp xếp mới → cũ (ưu tiên updated_at, sau đó created_at, rồi id)
+        $builder->orderBy('updated_at', 'DESC')
+            ->orderBy('created_at', 'DESC')
+            ->orderBy('id', 'DESC');
+
         $products = $builder->paginate($perPage, 'default', $page);
 
         foreach ($products as &$product) {
-            // Decode JSON fields
-            $jsonFields = ['avatar', 'images', 'video', 'certificate_file', 'display_settings'];
-            foreach ($jsonFields as $field) {
+            foreach (['avatar','images','video','certificate_file','display_settings'] as $field) {
                 if (isset($product[$field]) && is_string($product[$field])) {
                     $decoded = json_decode($product[$field], true);
                     $product[$field] = is_array($decoded) ? $decoded : [];
@@ -78,20 +77,19 @@ class ProductController extends ResourceController
                     $product[$field] = [];
                 }
             }
-
             unset($product['image']);
 
-            // Gán attributes
             $product['attributes'] = (new ProductAttributeModel())
                 ->where('product_id', $product['id'])
                 ->findAll();
         }
 
         return $this->respond([
-            'data' => $products,
+            'data'  => $products,
             'pager' => $productModel->pager->getDetails(),
         ]);
     }
+
 
 
 

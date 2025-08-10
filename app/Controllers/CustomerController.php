@@ -17,10 +17,16 @@ class CustomerController extends ResourceController
 
     public function index()
     {
-        $page    = $this->request->getGet('page') ?? 1;
-        $perPage = $this->request->getGet('per_page') ?? 10;
+        $page    = (int)($this->request->getGet('page') ?? 1);
+        $perPage = (int)($this->request->getGet('per_page') ?? 10);
 
-        $userQuery = $this->model->where('role', 'customer');
+        // Subquery đếm QR theo user_id
+        $qrCountSub = '(SELECT user_id, COUNT(*) AS qr_used FROM qr_codes GROUP BY user_id) qc';
+
+        $userQuery = $this->model
+            ->select('users.*, COALESCE(qc.qr_used, 0) AS qr_used')
+            ->where('role', 'customer')
+            ->join($qrCountSub, 'qc.user_id = users.id', 'left'); // <-- JOIN ở đây
 
         if ($search = $this->request->getGet('search')) {
             $userQuery->groupStart()
@@ -29,30 +35,21 @@ class CustomerController extends ResourceController
                 ->orLike('phone', $search)
                 ->groupEnd();
         }
+        if ($phone = $this->request->getGet('phone')) $userQuery->like('phone', $phone);
+        if ($email = $this->request->getGet('email')) $userQuery->like('email', $email);
+        if ($city  = $this->request->getGet('city'))  $userQuery->like('city', $city);
+        if ($from  = $this->request->getGet('from'))  $userQuery->where('created_at >=', $from);
+        if ($to    = $this->request->getGet('to'))    $userQuery->where('created_at <=', $to);
 
-        if ($phone = $this->request->getGet('phone')) {
-            $userQuery->like('phone', $phone);
-        }
+        // Sắp xếp mới -> cũ (tùy bạn)
+        $userQuery->orderBy('users.updated_at', 'DESC')
+            ->orderBy('users.created_at', 'DESC')
+            ->orderBy('users.id', 'DESC');
 
-        if ($email = $this->request->getGet('email')) {
-            $userQuery->like('email', $email);
-        }
+        $users = $userQuery->paginate($perPage, 'default', $page);
+        $pager = $this->model->pager;
 
-        if ($city = $this->request->getGet('city')) {
-            $userQuery->like('city', $city);
-        }
-
-        if ($from = $this->request->getGet('from')) {
-            $userQuery->where('created_at >=', $from);
-        }
-
-        if ($to = $this->request->getGet('to')) {
-            $userQuery->where('created_at <=', $to);
-        }
-
-        $users  = $userQuery->paginate($perPage, 'default', $page);
-        $pager  = $this->model->pager;
-
+        // Nếu cần thêm thông tin gói như code cũ
         $purchaseModel = new PurchaseHistoryModel();
         $users = is_array($users) ? $users : [];
 
@@ -67,47 +64,36 @@ class CustomerController extends ResourceController
             $user['packages'] = is_array($packages) ? $packages : [];
 
             $latestStatus = null;
-
             foreach ($user['packages'] as &$package) {
                 $now = time();
                 $expireTime = strtotime($package['expires_at']);
 
                 if ((int)$package['is_paid'] === 0) {
-                    // ❌ Chưa thanh toán
-                    $package['is_active'] = 0;
-                    $latestStatus = 2;
+                    $package['is_active'] = 0; $latestStatus = 2; // chưa thanh toán
                 } else {
                     if ($expireTime < $now) {
-                        // 🛑 Đã thanh toán nhưng hết hạn
-                        $package['is_active'] = 0;
-                        $latestStatus = 4;
+                        $package['is_active'] = 0; $latestStatus = 4; // hết hạn
                     } else {
-                        // ✅ Đã thanh toán và còn hạn
-                        $package['is_active'] = 1;
-                        $latestStatus = 1;
+                        $package['is_active'] = 1; $latestStatus = 1; // còn hạn
                     }
                 }
-
-                // Cập nhật lại trong DB nếu cần
                 $purchaseModel->update($package['id'], ['is_active' => $package['is_active']]);
             }
 
-            // Cập nhật status người dùng nếu khác hiện tại
             if ($latestStatus !== null && (int)$user['status'] !== $latestStatus) {
                 $this->model->update($user['id'], ['status' => $latestStatus]);
                 $user['status'] = $latestStatus;
             }
+
+            // $user['qr_used'] đã có từ JOIN (COALESCE(...))
         }
 
-
-
-
         return $this->respond([
-            'data' => $users,
+            'data'  => $users,
             'pager' => [
-                'total'       => $pager->getTotal(),
-                'per_page'    => $perPage,
-                'current'     => $page,
+                'total'    => $pager->getTotal(),
+                'per_page' => $perPage,
+                'current'  => $page,
             ]
         ]);
     }
