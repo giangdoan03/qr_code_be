@@ -8,17 +8,27 @@ use CodeIgniter\Router\RouteCollection;
 
 
 $routes->group('api', function ($routes) {
+    // Auth
     $routes->post('login', 'Auth::login');
     $routes->get('check', 'Auth::check');
     $routes->get('logout', 'Auth::logout');
 
-    $routes->resource('products', ['controller' => 'ProductController']);
-    $routes->post('products/import', 'ProductController::import'); // ✅ dùng dấu /
+    // Products – hành động tuỳ biến (nên đặt TRƯỚC resource, nhưng ở đây không xung đột)
+    $routes->post('products/import', 'ProductController::import');
     $routes->get('products-export-excel', 'ProductController::exportExcel');
     $routes->get('products-export-pdf', 'ProductController::exportPdf');
     $routes->post('products-restore/(:num)', 'ProductController::restore/$1');
     $routes->post('products-export-selected', 'ProductController::exportSelected');
-    $routes->post('products/(:num)/toggle-status', 'ProductController::toggleStatus/$1');
+
+    // Toggle status (đang có)
+    $routes->post('products/(:num)/toggle-status', 'ProductController::toggleStatus/$1', ['filter' => 'isAdmin']);
+
+    // ✅ Duyệt / Bỏ duyệt – chỉ admin mới được quyền (nên gắn filter nếu có)
+    $routes->post('products/(:num)/approve',   'ProductController::approve/$1',   ['as' => 'products.approve'  /*, 'filter' => 'isAdmin'*/]);
+    $routes->post('products/(:num)/unapprove', 'ProductController::unapprove/$1', ['as' => 'products.unapprove'/*, 'filter' => 'isAdmin'*/]);
+
+    // Resource CRUD chuẩn
+    $routes->resource('products', ['controller' => 'ProductController']);
 
     $routes->resource('categories', ['controller' => 'CategoryController']);
     $routes->resource('businesses', ['controller' => 'BusinessController']);

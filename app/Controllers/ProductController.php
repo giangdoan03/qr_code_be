@@ -176,7 +176,7 @@ class ProductController extends ResourceController
             'price_to' => $data['price_to'] ?? null,
             'show_contact_price' => !empty($data['show_contact_price']) ? 1 : 0,
             'description' => $data['description'] ?? null,
-            'status' => !empty($data['status']) ? 1 : 0,
+            'status' => 0,
             'contact_phone' => $data['contact_phone'] ?? null,
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
@@ -218,7 +218,7 @@ class ProductController extends ResourceController
         $product = $productModel->find($productId);
         return $this->respondCreated([
             'status' => 'success',
-            'message' => 'Tạo sản phẩm thành công',
+            'message' => 'Tạo sản phẩm thành công (chờ admin duyệt)',
             'data' => $product
         ]);
     }
@@ -235,24 +235,18 @@ class ProductController extends ResourceController
         $productModel = new ProductModel();
         $attributeModel = new ProductAttributeModel();
 
-        // Lấy thông tin user để kiểm tra role
         $user = model('App\Models\UserModel')->find($userId);
         $isAdmin = $user && $user['role'] === 'admin';
 
         $data = $this->request->getJSON(true);
 
-        // Kiểm tra quyền sở hữu sản phẩm
         $product = $productModel->find($id);
-        if (!$product) {
-            return $this->failNotFound('Sản phẩm không tồn tại');
-        }
-        // Nếu không phải admin thì kiểm tra quyền sở hữu
+        if (!$product) return $this->failNotFound('Sản phẩm không tồn tại');
         if (!$isAdmin && $product['user_id'] != $userId) {
             return $this->failForbidden('Bạn không có quyền sửa sản phẩm này');
         }
 
-
-        // ✅ Trường hợp chỉ cập nhật ảnh (images) => bỏ qua validate
+        // Chỉ cập nhật ảnh
         if (isset($data['images']) && count($data) === 1) {
             $productModel->update($id, [
                 'images' => is_array($data['images']) ? json_encode($data['images']) : $data['images'],
@@ -261,13 +255,9 @@ class ProductController extends ResourceController
             return $this->respond(['message' => 'Cập nhật ảnh sản phẩm thành công']);
         }
 
-        // ✅ Trường hợp cập nhật đầy đủ => cần validate
         $validationResult = $this->validateProduct($data);
-        if ($validationResult !== true) {
-            return $validationResult;
-        }
+        if ($validationResult !== true) return $validationResult;
 
-        // ✅ Chuẩn bị dữ liệu cập nhật
         $productData = [
             'sku' => $data['sku'] ?? null,
             'name' => $data['name'] ?? null,
@@ -279,32 +269,24 @@ class ProductController extends ResourceController
             'show_contact_price' => !empty($data['show_contact_price']) ? 1 : 0,
             'contact_phone' => $data['contact_phone'] ?? null,
             'description' => $data['description'] ?? null,
-            'status' => !empty($data['status']) ? 1 : 0,
             'updated_at' => date('Y-m-d H:i:s'),
+            // ❗ Không set 'status' ở đây; sẽ xử lý phía dưới
         ];
 
-        // ✅ Các field dạng JSON
-        $jsonFields = ['avatar', 'images', 'video', 'certificate_file', 'attributes', 'display_settings'];
-        foreach ($jsonFields as $field) {
+        foreach (['avatar','images','video','certificate_file','attributes','display_settings'] as $field) {
             if (isset($data[$field])) {
-                $value = $data[$field];
-                $productData[$field] = is_string($value) ? $value : json_encode($value);
-            } else {
-                $productData[$field] = json_encode([]);
+                $v = $data[$field];
+                $productData[$field] = is_string($v) ? $v : json_encode($v);
             }
         }
 
-        // ✅ display_settings nếu có
-        if (!empty($data['display_settings'])) {
-            $productData['display_settings'] = is_string($data['display_settings'])
-                ? $data['display_settings']
-                : json_encode($data['display_settings']);
+        // Chỉ admin mới được đổi status
+        if ($isAdmin && array_key_exists('status', $data)) {
+            $productData['status'] = (int) !!$data['status']; // 0|1
         }
 
-        // ✅ Cập nhật sản phẩm
         $productModel->update($id, $productData);
 
-        // ✅ Cập nhật thuộc tính
         if (!empty($data['attributes']) && is_array($data['attributes'])) {
             $attributeModel->where('product_id', $id)->delete();
             foreach ($data['attributes'] as $attribute) {
@@ -324,38 +306,78 @@ class ProductController extends ResourceController
     }
 
 
+    public function approve($id)
+    {
+        $userId = session()->get('user_id');
+        $user = model('App\Models\UserModel')->find($userId);
+        if (!$user || $user['role'] !== 'admin') return $this->failForbidden('Chỉ admin được duyệt');
+
+        $pm = new ProductModel();
+        if (!$pm->find($id)) return $this->failNotFound('Sản phẩm không tồn tại');
+
+        $pm->update($id, ['status' => 1, 'updated_at' => date('Y-m-d H:i:s')]); // 1 = đã duyệt
+        return $this->respond(['message' => 'Đã duyệt sản phẩm']);
+    }
+
+    public function unapprove($id)
+    {
+        $userId = session()->get('user_id');
+        $user = model('App\Models\UserModel')->find($userId);
+        if (!$user || $user['role'] !== 'admin') return $this->failForbidden('Chỉ admin được thay đổi');
+
+        $pm = new ProductModel();
+        if (!$pm->find($id)) return $this->failNotFound('Sản phẩm không tồn tại');
+
+        $pm->update($id, ['status' => 0, 'updated_at' => date('Y-m-d H:i:s')]); // 0 = chưa duyệt
+        return $this->respond(['message' => 'Đã chuyển về chưa duyệt']);
+    }
+
+
+
+
     /**
      * @throws \ReflectionException
      */
     public function toggleStatus($id = null): ResponseInterface
     {
-        $session = session();
-        $userId = $session->get('user_id'); // 👈 Lấy user_id từ session
-
-        $productModel = new ProductModel();
-        $data = $this->request->getJSON(true);
-
-        // Kiểm tra status hợp lệ
-        if (!isset($data['status'])) {
-            return $this->failValidationErrors('Thiếu trạng thái');
+        // ✅ Phải đăng nhập
+        $userId = session()->get('user_id');
+        if (!$userId) {
+            return $this->failUnauthorized('Bạn chưa đăng nhập');
         }
 
-        // Kiểm tra sản phẩm có tồn tại và thuộc user này không
+        // ✅ Chỉ admin mới được đổi trạng thái
+        $user = model('App\Models\UserModel')->find($userId);
+        if (!$user || ($user['role'] ?? null) !== 'admin') {
+            return $this->failForbidden('Chỉ admin mới có quyền đổi trạng thái');
+        }
+
+        // ✅ Lấy payload & validate
+        $data = $this->request->getJSON(true) ?? [];
+        if (!array_key_exists('status', $data)) {
+            return $this->failValidationErrors('Thiếu trạng thái');
+        }
+        // Ép về 0/1 an toàn
+        $status = (int) (!!$data['status']);
+
+        // ✅ Tồn tại sản phẩm
+        $productModel = new ProductModel();
         $product = $productModel->find($id);
         if (!$product) {
             return $this->failNotFound('Sản phẩm không tồn tại');
         }
-        if ($product['user_id'] != $userId) {
-            return $this->failForbidden('Bạn không có quyền thay đổi trạng thái sản phẩm này');
-        }
 
-        // Cập nhật trạng thái
+        // ✅ Cập nhật (không cần kiểm tra chủ sở hữu)
         $productModel->update($id, [
-            'status' => $data['status'] ? 1 : 0,
-            'updated_at' => date('Y-m-d H:i:s')
+            'status'     => $status,
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
-        return $this->respond(['message' => 'Cập nhật trạng thái thành công']);
+        return $this->respond([
+            'message' => 'Cập nhật trạng thái thành công',
+            'id'      => (int) $id,
+            'status'  => $status,
+        ]);
     }
 
 

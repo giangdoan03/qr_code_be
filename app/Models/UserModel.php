@@ -30,7 +30,10 @@ class UserModel extends Model
         'qr_quota',
         'qr_used',
         'created_at',
-        'updated_at'
+        'updated_at',
+        'company_name',
+        'tax_code',
+        'customer_type',
     ];
 
     protected $useTimestamps = true;
