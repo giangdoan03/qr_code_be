@@ -4,6 +4,7 @@ namespace App\Controllers;
 use App\Controllers\BaseController;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
+use Config\Database;
 use App\Models\{QrCodeModel, QrScanLogModel};
 use CodeIgniter\API\ResponseTrait;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -172,6 +173,53 @@ class QrCodeController extends BaseController
         }
 
         return $this->respondDeleted(['qr_id' => $qr_id]);
+    }
+
+
+    public function bulkDelete(): ResponseInterface
+    {
+        // Nhận JSON body hoặc form
+        $payload = $this->request->getJSON(true) ?? $this->request->getPost();
+        $qrIds = array_values(array_filter(array_unique((array)($payload['ids'] ?? []))));
+
+        if (empty($qrIds)) {
+            return $this->failValidationError('Thiếu danh sách ids (qr_id)');
+        }
+
+        // Lọc theo quyền sở hữu để tránh xoá nhầm của user khác
+        $userId = $this->userId(); // tuỳ cách bạn lấy user hiện tại
+        $rows = $this->model
+            ->select('id, qr_id')
+            ->where('user_id', $userId)
+            ->whereIn('qr_id', $qrIds)
+            ->findAll();
+
+        if (empty($rows)) {
+            return $this->failNotFound('Không tìm thấy QR nào hợp lệ');
+        }
+
+        $internalIds   = array_column($rows, 'id');
+        $foundQrIds    = array_column($rows, 'qr_id');
+        $notFoundQrIds = array_values(array_diff($qrIds, $foundQrIds));
+
+        $db = Database::connect();
+        $db->transStart();
+
+        // Model::delete hỗ trợ mảng primary keys (id)
+        $this->model->delete($internalIds); // tôn trọng SoftDeletes nếu model dùng trait
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->fail('Xoá thất bại, vui lòng thử lại');
+        }
+
+        return $this->respondDeleted([
+            'requested' => $qrIds,
+            'deleted'   => $foundQrIds,
+            'not_found' => $notFoundQrIds,
+            'count'     => count($internalIds),
+        ]);
     }
 
     /**

@@ -70,6 +70,7 @@ $routes->group('api', function ($routes) {
         $routes->get('(:alphanum)', 'QrCodeController::show/$1');
         $routes->put('(:alphanum)', 'QrCodeController::update/$1');
         $routes->delete('(:alphanum)', 'QrCodeController::delete/$1');
+        $routes->delete('qr-codes/bulk', 'QrCodeController::bulkDelete'); // hoặc post(...) nếu bạn muốn
     });
 
     // 1. Truy cập QR gốc → sinh tracking_code → redirect
